@@ -1,0 +1,8 @@
+*.db3
+nltk_data
+venv
+.python-version
+*pycache*
+.idea
+.env
+
