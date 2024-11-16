@@ -1,8 +1,9 @@
 # Install:
-`python3 -m venv ./venv`
-`source ./venv/bin/activate`
-`pip install -r requirements.txt`
-`flet run main.py`
+- `python3 -m venv ./venv`
+- `source ./venv/bin/activate`
+- `pip install -r requirements.txt`
+- `playwright install`
+- `flet run main.py`
 
 # Setup API key:
 Go to https://cloud.google.com and sign up or sign in, create a project (I called mine FeedOrganizer)

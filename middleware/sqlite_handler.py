@@ -1,6 +1,73 @@
+import json
 import sqlite3
 
-DB_FILE = "temp.db3"
+DB_FILE = "data.db3"
+
+default_system_prompt = """You are an assistant AI that returns a category classifications from video information.
+Please output a single line Python list object
+Example:
+%s
+
+Do not wrap the object in markdown or use newlines and whitespace.
+Do not give any additional commentary or warnings, if output is not formated as described here it will cause crashes.
+Do not make up your own categories, only use the following categories: %s
+If words from the title are present in an available category, include it in the response.
+Always determine if the video is Educational or Entertainment and include the category.
+NEVER classify a video as both Educational and Entertainment, pick one or the other depending on relevance.
+Assign Educational if the video aims to impart some kind of real-world applicable knowledge.
+Some examples:
+  - Showing off something that was created, while it could contain educational moments, would be considered Entertainment focused.
+  - Describing how certain protocols work, even if done in an exciting and engaging way, would be considered Educational focused.
+  - Titles with humor like 'I Turned Myself Into a Human Battery', while containing educational moments, would be considered Entertainment focused.
+Next determine relevance to the remaining categories.
+Use at most 2 more categories.
+This means you should return a list containing between 1 and 3 relevant categories.
+Arrange your return list by having the most relevant categories at the beginning of the list.
+"""
+default_user_prompt = """Most frequent words in the transcript:
+```
+%s
+```
+
+Most frequent bigrams in the transcript (may be empty):
+```
+%s
+```
+
+Video Title: "%s"
+
+As a reminder, these are the categories to use in classification: %s
+"""
+default_custom_stop_words = [
+    "got",
+    "uh",
+    "like",
+    "right",
+    "let",
+    "actually",
+    "know",
+    "yeah",
+    "way",
+    "get",
+    "okay",
+    "um",
+    "kind",
+    "pretty",
+    "think",
+    "x",
+    "going",
+    "good",
+    "would",
+    "see",
+    "also",
+    "really",
+    "could",
+    "well",
+    "become",
+    "lot",
+    "well",
+    "oh",
+]
 
 
 class DBHandler:
@@ -20,8 +87,9 @@ class DBHandler:
             self.conn.commit()
 
     def create_schema(self):
+        print("Creating tables")
         create_tables_queries = [
-            "create table settings (setting TEXT NOT NULL, setting_value ANY NOT NULL)",
+            "create table settings (setting TEXT PRIMARY KEY, setting_value ANY NOT NULL)",
             "CREATE TABLE IF NOT EXISTS feeds (username TEXT PRIMARY KEY, display_name TEXT)",
             "CREATE TABLE IF NOT EXISTS categories (llm_category TEXT PRIMARY KEY, display_category TEXT NOT NULL UNIQUE)",
             "CREATE TABLE IF NOT EXISTS video_categories (video_id TEXT, llm_category TEXT, FOREIGN KEY (video_id) REFERENCES videos(video_id), FOREIGN KEY (llm_category) REFERENCES categories(llm_category))",
@@ -30,6 +98,21 @@ class DBHandler:
         for query in create_tables_queries:
             self.cur.execute(query)
         self.conn.commit()
+        print("Done")
+
+        # Add default settings
+        print("Adding default settings")
+        self.put_setting("app_confirm_delete", "True")
+        self.put_setting("app_tooltip_time", "1000")
+        self.put_setting("yt_api_key", "Fill in this value...")
+        self.put_setting("ollama_model", "qwen2.5-coder:7b")
+        self.put_setting("ollama_ctx_size", "1200")
+        self.put_setting("ollama_system_prompt", default_system_prompt)
+        self.put_setting("ollama_user_prompt", default_user_prompt)
+        self.put_setting(
+            "ollama_custom_stop_words", json.dumps(default_custom_stop_words)
+        )
+        print("Done")
 
     def add_feed(self, username, display_name):
         self.cur.execute(
@@ -209,21 +292,62 @@ class DBHandler:
         )
         self.conn.commit()
 
-    def get_video_grid_data(self, start_date=None, end_date=None):
+    def video_grid_query_construct(self, feed_filters, category_filters, limit):
         query = """
-            SELECT v.video_id, f.username, f.display_name, v.url, v.title, v.upload_date, v.thumbnail, c.display_category
-            FROM videos v
-            JOIN video_categories vc ON v.video_id = vc.video_id
-            JOIN categories c ON vc.llm_category = c.llm_category
-            JOIN feeds f ON v.username = f.username
-            ORDER BY v.upload_date DESC
-        """
-        params = []
-        if start_date and end_date:
-            query += " WHERE v.upload_date BETWEEN ? AND ?"
-            params.extend([start_date, end_date])
+                SELECT v.video_id, f.username, f.display_name, v.url, v.title, v.upload_date, v.thumbnail, c.display_category
+                FROM videos v
+                JOIN video_categories vc ON v.video_id = vc.video_id
+                JOIN categories c ON vc.llm_category = c.llm_category
+                JOIN feeds f ON v.username = f.username
+            """
 
-        self.cur.execute(query, tuple(params))
+        # Construct the WHERE clause based on feed_filters and category_filters
+        where_clauses = []
+
+        if feed_filters:
+            feed_placeholders = ", ".join(["?"] * len(feed_filters))
+            where_clauses.append(f"f.username IN ({feed_placeholders})")
+
+        if category_filters:
+            category_placeholders = ", ".join(["?"] * len(category_filters))
+            # Use a subquery to ensure each video matches all categories
+            where_clauses.append(
+                f"""
+                    v.video_id IN (
+                        SELECT vc.video_id
+                        FROM video_categories vc
+                        WHERE vc.llm_category IN ({category_placeholders})
+                        GROUP BY vc.video_id
+                        HAVING COUNT(DISTINCT vc.llm_category) = ?
+                    )
+                """
+            )
+
+        if where_clauses:
+            query += " WHERE " + " AND ".join(where_clauses)
+
+        query += " ORDER BY v.upload_date DESC LIMIT ?;"
+
+        # Prepare the parameters for the query
+        params = []
+        if feed_filters:
+            params.extend(feed_filters)
+        if category_filters:
+            params.extend(category_filters)
+            params.append(
+                len(category_filters)
+            )  # Add the count of categories for the HAVING clause
+        params.append(limit)
+
+        return query, tuple(params)
+
+    def get_video_grid_data(self, feed_filters, category_filters, limit=100):
+        # Thank you qwen2.5-coder:32b for giving me the function to construct a query
+        # that or's the feeds and and's the categories
+        query, params = self.video_grid_query_construct(
+            feed_filters, category_filters, limit
+        )
+        self.cur.execute(query, params)
         results = self.cur.fetchall()
 
         videos = []
@@ -243,7 +367,8 @@ class DBHandler:
                 video_dict[video_id] = {
                     "id": video_id,
                     "url": url,
-                    "username": display_name,
+                    "username": username,
+                    "display_name": display_name,
                     "title": title,
                     "upload_date": upload_date,
                     "thumbnail": thumbnail,
@@ -277,7 +402,8 @@ class DBHandler:
 
     def put_setting(self, name, value):
         self.cur.execute(
-            "UPDATE settings SET setting_value = ? WHERE setting = ?", (value, name)
+            "INSERT INTO settings (setting, setting_value) VALUES (?, ?) ON CONFLICT(setting) DO UPDATE SET setting_value = excluded.setting_value;",
+            (name, value),
         )
         self.conn.commit()
 

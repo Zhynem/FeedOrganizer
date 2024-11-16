@@ -27,7 +27,7 @@ class VideoTile(ft.Container):
                     disabled_color=ft.colors.PRIMARY_CONTAINER,
                     padding=0,
                 )
-                for category in data["categories"]
+                for category in sorted(data["categories"], key=lambda x: x.lower())
             ],
             tight=True,
             scroll=ft.ScrollMode.AUTO,
@@ -52,7 +52,7 @@ class VideoTile(ft.Container):
                             ),
                         ),
                         ft.Text(
-                            data["username"],
+                            data["display_name"],
                             style=self.text_style,
                             max_lines=1,
                             overflow=ft.TextOverflow.ELLIPSIS,

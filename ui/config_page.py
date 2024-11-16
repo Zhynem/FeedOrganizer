@@ -53,6 +53,7 @@ class ConfigPage(ft.AlertDialog):
             tight=False,
             width=width,
             height=height,
+            scroll=ft.ScrollMode.ALWAYS,
         )
         self.actions = [
             ft.TextButton("Cancel", on_click=lambda _: self.page.close(self)),

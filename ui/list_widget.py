@@ -139,7 +139,7 @@ class MyListWidget(ft.Container):
             )
         )
 
-        self.list_items.controls.sort(key=lambda i: i.data[1])
+        self.list_items.controls.sort(key=lambda i: i.data[1].lower())
 
         try:
             self.list_items.update()

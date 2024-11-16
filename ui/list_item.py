@@ -34,11 +34,11 @@ class MyListItem(ft.ListTile):
         if self.selected:
             print(f"Removing Filter: {self.data[1]}")
             self.selected = False
-            self.filter_cb(self.data[1], self.tile_type, "removed")
+            self.filter_cb(self.data[0], self.tile_type, "removed")
         else:
             print(f"Adding Filter  : {self.data[1]}")
             self.selected = True
-            self.filter_cb(self.data[1], self.tile_type, "added")
+            self.filter_cb(self.data[0], self.tile_type, "added")
         self.update()
 
     def delete_item(self, _):
